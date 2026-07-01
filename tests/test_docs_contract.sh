@@ -56,8 +56,15 @@ require_text docs/cgroup-memory.md "cgroup v2"
 require_text docs/gpu-video.md "nvscope"
 require_text docs/packaging.md "Release Checklist"
 require_text docs/packaging.md "GitHub Release Workflow"
+require_text docs/packaging.md "does not run make test"
+require_text .github/workflows/ci.yml "name: Build"
 require_text docs/troubleshooting.md "runpod-shim-probe"
 require_text .github/workflows/release.yml "workflow_dispatch"
 require_text .github/workflows/release.yml "contents: write"
 require_text .github/workflows/release.yml "make package-deb-compatible"
 require_text .github/workflows/release.yml "gh \"\${args[@]}\""
+
+if grep -F "make test" .github/workflows/ci.yml; then
+    echo "GitHub Build workflow should only build packages; do not run tests there" >&2
+    exit 1
+fi
