@@ -1,0 +1,101 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    cat <<'EOF'
+usage: runpod-shim [options] -- command [args...]
+
+Run a command with Runpod Shim enabled.
+
+Options:
+  --trace                    enable trace logging
+  --disable-gpu-video        disable NVIDIA video topology fixes
+  --disable-gpu-ioctl        disable NVIDIA RM ioctl filtering only
+  --disable-cgroup-memory    disable cgroup-aware memory reporting
+  --lib PATH                 use a specific librunpod-shim.so
+  -h, --help                 show this help
+EOF
+}
+
+script_dir="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+prefix_dir="$(CDPATH= cd "$script_dir/.." && pwd)"
+source_lib="$prefix_dir/librunpod-shim.so"
+installed_relocatable_lib="$prefix_dir/lib/runpod-shim/librunpod-shim.so"
+installed_local_lib="/usr/local/lib/runpod-shim/librunpod-shim.so"
+installed_system_lib="/usr/lib/runpod-shim/librunpod-shim.so"
+lib="${RUNPOD_SHIM_LIB:-}"
+
+if [ -z "$lib" ]; then
+    if [ -f "$source_lib" ]; then
+        lib="$source_lib"
+    elif [ -f "$installed_relocatable_lib" ]; then
+        lib="$installed_relocatable_lib"
+    elif [ -f "$installed_local_lib" ]; then
+        lib="$installed_local_lib"
+    else
+        lib="$installed_system_lib"
+    fi
+fi
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --trace)
+            export RUNPOD_SHIM_TRACE=1
+            shift
+            ;;
+        --disable-gpu-video)
+            export RUNPOD_SHIM_GPU_VIDEO=0
+            shift
+            ;;
+        --disable-gpu-ioctl)
+            export RUNPOD_SHIM_GPU_IOCTL=0
+            shift
+            ;;
+        --disable-cgroup-memory)
+            export RUNPOD_SHIM_CGROUP_MEMORY=0
+            shift
+            ;;
+        --lib)
+            if [ "$#" -lt 2 ]; then
+                echo "runpod-shim: --lib requires a path" >&2
+                exit 2
+            fi
+            lib="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "runpod-shim: unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ "$#" -eq 0 ]; then
+    usage >&2
+    exit 2
+fi
+
+if [ ! -f "$lib" ]; then
+    echo "runpod-shim: library not found at $lib" >&2
+    exit 1
+fi
+
+if [ -n "${LD_PRELOAD:-}" ]; then
+    export LD_PRELOAD="$lib:$LD_PRELOAD"
+else
+    export LD_PRELOAD="$lib"
+fi
+
+exec "$@"

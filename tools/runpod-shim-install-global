@@ -1,0 +1,100 @@
+#!/bin/sh
+set -eu
+
+root="${RUNPOD_SHIM_GLOBAL_ROOT:-}"
+default_lib="/usr/lib/runpod-shim/librunpod-shim.so"
+lib="${RUNPOD_SHIM_GLOBAL_LIB:-$default_lib}"
+preload="$root/etc/ld.so.preload"
+
+usage() {
+    echo "usage: runpod-shim-install-global enable|disable|status" >&2
+}
+
+if [ "$#" -ne 1 ]; then
+    usage
+    exit 2
+fi
+
+ensure_preload() {
+    mkdir -p "$(dirname "$preload")"
+    touch "$preload"
+}
+
+has_lib() {
+    if grep -Fx "$lib" "$preload" >/dev/null 2>&1; then
+        return 0
+    else
+        status=$?
+    fi
+
+    if [ "$status" -eq 1 ]; then
+        return 1
+    fi
+
+    echo "failed to read $preload" >&2
+    exit "$status"
+}
+
+append_lib() {
+    if [ -s "$preload" ]; then
+        last_char=$(tail -c 1 "$preload")
+        if [ -n "$last_char" ]; then
+            printf '\n' >>"$preload"
+        fi
+    fi
+
+    printf '%s\n' "$lib" >>"$preload"
+}
+
+remove_lib() {
+    tmp="$preload.tmp.$$"
+
+    if grep -Fxv "$lib" "$preload" >"$tmp"; then
+        :
+    else
+        status=$?
+        if [ "$status" -ne 1 ]; then
+            rm -f "$tmp"
+            echo "failed to filter $preload" >&2
+            exit "$status"
+        fi
+    fi
+
+    if ! cat "$tmp" >"$preload"; then
+        rm -f "$tmp"
+        echo "failed to update $preload" >&2
+        exit 1
+    fi
+
+    rm -f "$tmp"
+}
+
+case "$1" in
+    enable)
+        ensure_preload
+        if ! has_lib; then
+            append_lib
+        fi
+        echo "runpod-shim global preload enabled: $lib"
+        ;;
+    disable)
+        ensure_preload
+        remove_lib
+        echo "runpod-shim global preload disabled: $lib"
+        ;;
+    status)
+        if [ -e "$preload" ]; then
+            if has_lib; then
+                echo "enabled: $lib"
+            else
+                echo "disabled: $lib"
+            fi
+        else
+            echo "disabled: $lib"
+        fi
+        ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac

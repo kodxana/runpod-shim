@@ -1,0 +1,32 @@
+name: runpod-shim
+# Optional nfpm packaging is static for direct use after `make`; `make package-deb`
+# derives the native Debian architecture for the locally compiled shared object.
+arch: amd64
+platform: linux
+version: 0.1.0
+section: utils
+priority: optional
+maintainer: Madiator2011
+description: LD_PRELOAD compatibility shim for Runpod workloads.
+license: MIT
+contents:
+  - src: ./tools/runpod-shim
+    dst: /usr/bin/runpod-shim
+    file_info:
+      mode: 0755
+  - src: ./tools/runpod-shim-probe
+    dst: /usr/bin/runpod-shim-probe
+    file_info:
+      mode: 0755
+  - src: ./tools/runpod-shim-install-global
+    dst: /usr/bin/runpod-shim-install-global
+    file_info:
+      mode: 0755
+  - src: ./librunpod-shim.so
+    dst: /usr/lib/runpod-shim/librunpod-shim.so
+    file_info:
+      mode: 0755
+  - src: ./README.md
+    dst: /usr/share/doc/runpod-shim/README.md
+    file_info:
+      mode: 0644

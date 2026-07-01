@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, with or without a leading v
+        required: true
+        type: string
+      draft:
+        description: Create the GitHub Release as a draft
+        required: true
+        type: boolean
+        default: true
+      prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: true
+        type: boolean
+        default: false
+      build_image:
+        description: Container image used for the compatible package build
+        required: true
+        type: string
+        default: ubuntu:20.04
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build package and create release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Normalize version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          raw="${{ inputs.version }}"
+          version="${raw#v}"
+
+          if [[ ! "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+([+~:.0-9A-Za-z-]+)?$ ]]; then
+            echo "version must look like 0.1.0 or v0.1.0" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build compatible Debian package
+        run: make package-deb-compatible
+        env:
+          RUNPOD_SHIM_VERSION: ${{ steps.version.outputs.version }}
+          RUNPOD_SHIM_BUILD_IMAGE: ${{ inputs.build_image }}
+
+      - name: Validate Debian package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deb="$(find build -maxdepth 1 -name 'runpod-shim_*.deb' -print -quit)"
+          if [[ -z "$deb" ]]; then
+            echo "release package was not created" >&2
+            exit 1
+          fi
+
+          test "$(dpkg-deb -f "$deb" Package)" = "runpod-shim"
+          test "$(dpkg-deb -f "$deb" Version)" = "${{ steps.version.outputs.version }}"
+          dpkg-deb --contents "$deb" | grep -F 'usr/bin/runpod-shim'
+          dpkg-deb --contents "$deb" | grep -F 'usr/lib/runpod-shim/librunpod-shim.so'
+
+          echo "deb=$deb" >> "$GITHUB_OUTPUT"
+          echo "deb_name=$(basename "$deb")" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat >release-notes.md <<EOF
+          Runpod Shim ${{ steps.version.outputs.tag }}
+
+          Debian package:
+          - ${{ steps.package.outputs.deb_name }}
+
+          See CHANGELOG.md for release details.
+          EOF
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.deb_name }}
+          path: ${{ steps.package.outputs.deb }}
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            release create "${{ steps.version.outputs.tag }}"
+            "${{ steps.package.outputs.deb }}"
+            --target "$GITHUB_SHA"
+            --title "Runpod Shim ${{ steps.version.outputs.tag }}"
+            --notes-file release-notes.md
+          )
+
+          if [[ "${{ inputs.draft }}" == "true" ]]; then
+            args+=(--draft)
+          fi
+
+          if [[ "${{ inputs.prerelease }}" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh "${args[@]}"
